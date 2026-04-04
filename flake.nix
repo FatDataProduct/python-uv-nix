@@ -33,6 +33,13 @@
     };
   };
 
+  nixConfig = {
+    extra-substituters = [ "https://nix2container.cachix.org" ];
+    extra-trusted-public-keys = [
+      "nix2container.cachix.org-1:WVlhaNzWoiLXfHMjrgCKJhfg647rVOqLEjg+mH4XTXQ="
+    ];
+  };
+
   outputs =
     inputs:
     inputs.flake-parts.lib.mkFlake { inherit inputs; } {

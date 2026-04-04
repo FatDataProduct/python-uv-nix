@@ -18,7 +18,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Nix flake check
-        run: nix flake check --no-build
+        run: nix flake check --no-build --accept-flake-config
 
       - name: Format check
         run: nix fmt -- --ci
@@ -31,7 +31,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build OCI image
-        run: nix build .#oci-prod
+        run: nix build .#oci-prod --accept-flake-config
 
       - name: Build summary
         run: |
@@ -53,20 +53,20 @@ jobs:
       - name: Login to GHCR
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | \
-            nix run .#skopeo -- login ${{ env.REGISTRY }} \
+            nix run .#skopeo --accept-flake-config -- login ${{ env.REGISTRY }} \
               -u ${{ github.actor }} --password-stdin
 
       - name: Push image
         run: |
-          IMG=$(nix build .#oci-prod --print-out-paths --no-link)
+          IMG=$(nix build .#oci-prod --accept-flake-config --print-out-paths --no-link)
           SHA="${{ github.sha }}"
           SHORT="${SHA:0:7}"
 
-          nix run .#skopeo -- --insecure-policy copy \
+          nix run .#skopeo --accept-flake-config -- --insecure-policy copy \
             "nix:$IMG" \
             "docker://${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${SHORT}"
 
-          nix run .#skopeo -- --insecure-policy copy \
+          nix run .#skopeo --accept-flake-config -- --insecure-policy copy \
             "nix:$IMG" \
             "docker://${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
 
