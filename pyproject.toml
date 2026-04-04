@@ -1,0 +1,10 @@
+[project]
+name = "app"
+version = "0.1.0"
+description = "A Python project with Nix CI/CD"
+requires-python = ">=3.13"
+dependencies = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.backends"

@@ -1,0 +1,75 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  check:
+    name: "\U0001F50D Check & Lint"
+    runs-on: [self-hosted, nix]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Nix flake check
+        run: nix flake check --no-build
+
+      - name: Format check
+        run: nix fmt -- --check
+
+  build:
+    name: "\U0001F4E6 Build OCI"
+    runs-on: [self-hosted, nix]
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build OCI image
+        run: nix build .#oci-prod
+
+      - name: Build summary
+        run: |
+          echo "## \U0001F4E6 OCI Image" >> $GITHUB_STEP_SUMMARY
+          SIZE=$(nix path-info -Sh ./result 2>/dev/null | awk '{print $2}' || echo "?")
+          echo "Closure size: **$SIZE**" >> $GITHUB_STEP_SUMMARY
+
+  push:
+    name: "\U0001F680 Push to GHCR"
+    runs-on: [self-hosted, nix]
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Login to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | \
+            nix run .#skopeo -- login ${{ env.REGISTRY }} \
+              -u ${{ github.actor }} --password-stdin
+
+      - name: Push image
+        run: |
+          IMG=$(nix build .#oci-prod --print-out-paths --no-link)
+          SHA="${{ github.sha }}"
+          SHORT="${SHA:0:7}"
+
+          nix run .#skopeo -- --insecure-policy copy \
+            "nix:$IMG" \
+            "docker://${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${SHORT}"
+
+          nix run .#skopeo -- --insecure-policy copy \
+            "nix:$IMG" \
+            "docker://${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
+
+          echo "## \U0001F680 Pushed to GHCR" >> $GITHUB_STEP_SUMMARY
+          echo "- \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${SHORT}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest\`" >> $GITHUB_STEP_SUMMARY
