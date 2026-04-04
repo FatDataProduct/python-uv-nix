@@ -21,7 +21,7 @@ jobs:
         run: nix flake check --no-build
 
       - name: Format check
-        run: nix fmt -- --check
+        run: nix fmt -- --ci
 
   build:
     name: "\U0001F4E6 Build OCI"
