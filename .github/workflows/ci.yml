@@ -9,40 +9,43 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
+  NIX_FLAGS: "--accept-flake-config"
 
 jobs:
   check:
-    name: "\U0001F50D Check & Lint"
+    name: "🔍 Check & Lint"
     runs-on: [self-hosted, nix]
     steps:
       - uses: actions/checkout@v4
 
-      - name: Nix flake check
-        run: nix flake check --no-build --accept-flake-config
-
-      - name: Format check
-        run: nix fmt -- --ci
+      - name: Flake check + format
+        run: |
+          nix flake check --no-build $NIX_FLAGS &
+          CHECK_PID=$!
+          nix fmt -- --ci $NIX_FLAGS &
+          FMT_PID=$!
+          wait $CHECK_PID
+          wait $FMT_PID
 
   build:
-    name: "\U0001F4E6 Build OCI"
+    name: "📦 Build OCI"
     runs-on: [self-hosted, nix]
-    needs: check
     steps:
       - uses: actions/checkout@v4
 
       - name: Build OCI image
-        run: nix build .#oci-prod --accept-flake-config
+        run: nix build .#oci-prod $NIX_FLAGS
 
       - name: Build summary
         run: |
-          echo "## \U0001F4E6 OCI Image" >> $GITHUB_STEP_SUMMARY
+          echo "## 📦 OCI Image" >> $GITHUB_STEP_SUMMARY
           SIZE=$(nix path-info -Sh ./result 2>/dev/null | awk '{print $2}' || echo "?")
           echo "Closure size: **$SIZE**" >> $GITHUB_STEP_SUMMARY
 
   push:
-    name: "\U0001F680 Push to GHCR"
+    name: "🚀 Push to GHCR"
     runs-on: [self-hosted, nix]
-    needs: build
+    needs: [check, build]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
       contents: read
@@ -53,23 +56,23 @@ jobs:
       - name: Login to GHCR
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | \
-            nix run .#skopeo --accept-flake-config -- login ${{ env.REGISTRY }} \
+            nix run .#skopeo $NIX_FLAGS -- login ${{ env.REGISTRY }} \
               -u ${{ github.actor }} --password-stdin
 
       - name: Push image
         run: |
-          IMG=$(nix build .#oci-prod --accept-flake-config --print-out-paths --no-link)
+          IMG=$(nix build .#oci-prod $NIX_FLAGS --print-out-paths --no-link)
           SHA="${{ github.sha }}"
           SHORT="${SHA:0:7}"
 
-          nix run .#skopeo --accept-flake-config -- --insecure-policy copy \
+          nix run .#skopeo $NIX_FLAGS -- --insecure-policy copy \
             "nix:$IMG" \
             "docker://${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${SHORT}"
 
-          nix run .#skopeo --accept-flake-config -- --insecure-policy copy \
+          nix run .#skopeo $NIX_FLAGS -- --insecure-policy copy \
             "nix:$IMG" \
             "docker://${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
 
-          echo "## \U0001F680 Pushed to GHCR" >> $GITHUB_STEP_SUMMARY
+          echo "## 🚀 Pushed to GHCR" >> $GITHUB_STEP_SUMMARY
           echo "- \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${SHORT}\`" >> $GITHUB_STEP_SUMMARY
           echo "- \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest\`" >> $GITHUB_STEP_SUMMARY
