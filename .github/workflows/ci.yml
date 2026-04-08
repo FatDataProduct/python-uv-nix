@@ -22,7 +22,7 @@ jobs:
         run: |
           nix flake check --no-build $NIX_FLAGS &
           CHECK_PID=$!
-          nix fmt -- --ci $NIX_FLAGS &
+          nix fmt $NIX_FLAGS -- --ci &
           FMT_PID=$!
           wait $CHECK_PID
           wait $FMT_PID
