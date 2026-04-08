@@ -12,10 +12,21 @@
       overlay = workspace.mkPyprojectOverlay { sourcePreference = "wheel"; };
 
       pythonBase = pkgs.callPackage inputs.pyproject-nix.build.packages { inherit python; };
+      filteredSrc = pkgs.lib.fileset.toSource {
+        root = ../.;
+        fileset = pkgs.lib.fileset.unions [
+          ../app
+          ../pyproject.toml
+        ];
+      };
+
       pythonSet = pythonBase.overrideScope (
         pkgs.lib.composeManyExtensions [
           inputs.pyproject-build-systems.overlays.default
           overlay
+          (_final: prev: {
+            app = prev.app.overrideAttrs { src = filteredSrc; };
+          })
         ]
       );
 

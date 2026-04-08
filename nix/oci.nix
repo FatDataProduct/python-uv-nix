@@ -15,7 +15,10 @@
 
       appSrc = pkgs.stdenv.mkDerivation {
         name = "app-src";
-        src = pkgs.lib.cleanSource ../.;
+        src = pkgs.lib.fileset.toSource {
+          root = ../.;
+          fileset = ../app;
+        };
         phases = [ "installPhase" ];
         installPhase = ''
           mkdir -p $out/app
