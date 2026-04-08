@@ -66,15 +66,16 @@ jobs:
           IMG=$(nix build .#oci-prod $NIX_FLAGS --print-out-paths --no-link)
           SHA="${{ github.sha }}"
           SHORT="${SHA:0:7}"
+          REPO="${IMAGE_NAME,,}"
 
           nix run .#skopeo $NIX_FLAGS -- --insecure-policy copy \
             "nix:$IMG" \
-            "docker://${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${SHORT}"
+            "docker://${{ env.REGISTRY }}/${REPO}:${SHORT}"
 
           nix run .#skopeo $NIX_FLAGS -- --insecure-policy copy \
             "nix:$IMG" \
-            "docker://${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
+            "docker://${{ env.REGISTRY }}/${REPO}:latest"
 
           echo "## 🚀 Pushed to GHCR" >> $GITHUB_STEP_SUMMARY
-          echo "- \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${SHORT}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`${{ env.REGISTRY }}/${REPO}:${SHORT}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- \`${{ env.REGISTRY }}/${REPO}:latest\`" >> $GITHUB_STEP_SUMMARY
