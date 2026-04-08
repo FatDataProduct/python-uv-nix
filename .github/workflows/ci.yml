@@ -12,29 +12,23 @@ env:
   NIX_FLAGS: "--accept-flake-config"
 
 jobs:
-  check:
-    name: "🔍 Check & Lint"
+  ci:
+    name: "🔍 Check & Build"
     runs-on: [self-hosted, nix]
     steps:
       - uses: actions/checkout@v4
 
-      - name: Flake check + format
+      - name: Check, lint & build
         run: |
           nix flake check --no-build $NIX_FLAGS &
           CHECK_PID=$!
           nix fmt $NIX_FLAGS -- --ci &
           FMT_PID=$!
+          nix build .#oci-prod $NIX_FLAGS &
+          BUILD_PID=$!
           wait $CHECK_PID
           wait $FMT_PID
-
-  build:
-    name: "📦 Build OCI"
-    runs-on: [self-hosted, nix]
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Build OCI image
-        run: nix build .#oci-prod $NIX_FLAGS
+          wait $BUILD_PID
 
       - name: Build summary
         run: |
@@ -45,7 +39,7 @@ jobs:
   push:
     name: "🚀 Push to GHCR"
     runs-on: [self-hosted, nix]
-    needs: [check, build]
+    needs: ci
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
       contents: read
