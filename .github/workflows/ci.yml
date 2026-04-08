@@ -50,6 +50,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+    env:
+      REGISTRY_AUTH_FILE: /tmp/skopeo-auth.json
     steps:
       - uses: actions/checkout@v4
 
