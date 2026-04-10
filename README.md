@@ -36,11 +36,40 @@ Standard `uv` commands work as usual: `uv add`, `uv sync`, `uv run`, etc.
 
 | Job | Trigger | What |
 |-----|---------|------|
-| **Check & Lint** | push, PR | `nix flake check` + `nix fmt --check` |
-| **Build OCI** | push, PR | `nix build .#oci-prod` |
-| **Push to GHCR** | merge to `main` | push `ghcr.io/org/repo:sha` + `:latest` |
+| **Checks** | push, PR | format, flake check, `oci-prod` + `oci-nix` builds (parallel) |
+| **Push GHCR** | merge to `main` | std + `-nix` теги |
+| **Deploy** | merge to `main` | SSH → `kubectl --context front` (app-std) и `--context back` (app-nix) |
 
-Runs on self-hosted runners with labels `[self-hosted, nix]`.
+Раннеры: `runs-on: [nix]` (nspawn на perturabo, свои лейблы).
+
+### Секреты GitHub Actions (деплой)
+
+Деплой идёт по **SSH на jump-хост**, где в одном kubeconfig есть контексты **`front`** и **`back`** (мультикластер).
+
+| Secret | Значение (пример для FatData Control) |
+|--------|----------------------------------------|
+| `SSH_HOST` | `89.111.170.51` — VPS «FatData Control», Ubuntu 24.04 |
+| `SSH_USERNAME` | `root` (или пользователь с `kubectl` и тем же kubeconfig) |
+| `SSH_PORT` | `22` |
+| `SSH_PRIVATE_KEY` | приватный ключ **только** для этого деплоя (Ed25519), публичный ключ в `~/.ssh/authorized_keys` на VPS |
+
+На сервере должны работать, например:
+
+```bash
+kubectl --context front get nodes
+kubectl --context back get nodes
+```
+
+Пароль root с панели регистратора — **не** кладите в GitHub Secrets; для CI достаточно SSH-ключа. Пароль лучше сменить, если он попадал в открытый канал.
+
+Установка секретов из CLI (пример):
+
+```bash
+gh secret set SSH_HOST -b"89.111.170.51" -R FatDataProduct/python-uv-nix
+gh secret set SSH_USERNAME -b"root" -R FatDataProduct/python-uv-nix
+gh secret set SSH_PORT -b"22" -R FatDataProduct/python-uv-nix
+gh secret set SSH_PRIVATE_KEY < deploy_key.pem -R FatDataProduct/python-uv-nix
+```
 
 ## Setup (without Nix)
 
