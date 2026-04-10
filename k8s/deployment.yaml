@@ -1,4 +1,5 @@
 # Two Deployments + shared Service
+# Применять в backend-кластере: kubectl --context back apply -f deployment.yaml
 #
 # app-std  — n2c image, runs on any node
 # app-nix  — nix-snapshotter image, only on nodes with label nix-snapshotter=true
