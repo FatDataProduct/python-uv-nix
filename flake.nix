@@ -19,10 +19,6 @@
       inputs.uv2nix.follows = "uv2nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    nix2container = {
-      url = "github:nlewo/nix2container";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
     nix-snapshotter = {
       url = "github:pdtpartners/nix-snapshotter";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -37,20 +33,9 @@
     };
   };
 
-  nixConfig = {
-    extra-substituters = [ "https://nix2container.cachix.org" ];
-    extra-trusted-public-keys = [
-      "nix2container.cachix.org-1:WVlhaNzWoiLXfHMjrgCKJhfg647rVOqLEjg+mH4XTXQ="
-    ];
-  };
-
-  outputs =
-    inputs:
+  outputs = inputs:
     inputs.flake-parts.lib.mkFlake { inherit inputs; } {
-      systems = [
-        "x86_64-linux"
-        "aarch64-linux"
-      ];
+      systems = [ "x86_64-linux" "aarch64-linux" ];
       imports = [
         inputs.git-hooks-nix.flakeModule
         inputs.treefmt-nix.flakeModule

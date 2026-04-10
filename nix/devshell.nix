@@ -1,12 +1,10 @@
 {
-  inputs,
   ...
 }:
 {
   perSystem =
     {
       pkgs,
-      system,
       venv,
       config,
       ...
@@ -30,8 +28,8 @@
           pkgs.uv
           pkgs.ruff
           pkgs.just
+          pkgs.skopeo
           varlock
-          inputs.nix2container.packages.${system}.skopeo-nix2container
         ];
         shellHook = ''
           ${config.pre-commit.installationScript}

@@ -1,4 +1,4 @@
-name: CI/CD
+name: CI
 
 on:
   push:
@@ -7,149 +7,67 @@ on:
   workflow_dispatch:
 
 permissions:
-  checks: write
   contents: read
   packages: write
 
-env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
-  NIX_FLAGS: "--accept-flake-config"
-
 jobs:
-  ci:
-    name: "⚡ CI/CD"
-    runs-on: [nix]
+  check:
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        run: |
-          git init -q
-          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
-          git fetch --depth=1 -q origin "$GITHUB_SHA"
-          git checkout -q FETCH_HEAD
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
 
-      - name: Run checks
-        id: checks
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          API="https://api.github.com/repos/${GITHUB_REPOSITORY}"
-          AUTH="Authorization: token ${GH_TOKEN}"
+      - name: Check flake
+        run: nix flake check --no-build
 
-          create_check() {
-            local resp id
-            resp=$(curl -s -X POST -H "$AUTH" -H "Accept: application/vnd.github+json" \
-              "${API}/check-runs" \
-              -d "{\"name\":\"$1\",\"head_sha\":\"${GITHUB_SHA}\",\"status\":\"in_progress\"}" 2>/dev/null) || true
-            id=$(echo "$resp" | grep -oE '"id" *: *[0-9]+' | head -1 | grep -oE '[0-9]+') || true
-            echo "${id:-0}"
-          }
+      - name: Format check
+        run: nix fmt -- --check
 
-          finish_check() {
-            [ "$1" = "0" ] || [ -z "$1" ] && return 0
-            curl -s -X PATCH -H "$AUTH" -H "Accept: application/vnd.github+json" \
-              "${API}/check-runs/$1" \
-              -d "{\"status\":\"completed\",\"conclusion\":\"$2\"}" > /dev/null 2>&1 || true
-          }
+      - name: Build OCI image
+        run: nix build .#oci-prod
 
-          FMT_CID=$(create_check "✅ Format")
-          CHECK_CID=$(create_check "✅ Flake Check")
-          BUILD_CID=$(create_check "📦 Build OCI")
-          NIXIMG_CID=$(create_check "📦 Build nix-image")
+  deploy:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
 
-          run_task() {
-            local cid=$1; shift
-            if "$@" 2>&1; then
-              finish_check "$cid" "success"; return 0
-            else
-              finish_check "$cid" "failure"; return 1
-            fi
-          }
-
-          run_task "$FMT_CID" nix fmt $NIX_FLAGS -- --ci &
-          FMT_PID=$!
-          run_task "$CHECK_CID" nix flake check --no-build $NIX_FLAGS &
-          CHECK_PID=$!
-          run_task "$BUILD_CID" nix build .#oci-prod $NIX_FLAGS &
-          BUILD_PID=$!
-          run_task "$NIXIMG_CID" nix build .#nix-image $NIX_FLAGS &
-          NIXIMG_PID=$!
-
-          FMT_RC=0;    wait $FMT_PID    || FMT_RC=$?
-          CHECK_RC=0;   wait $CHECK_PID   || CHECK_RC=$?
-          BUILD_RC=0;   wait $BUILD_PID   || BUILD_RC=$?
-          NIXIMG_RC=0;  wait $NIXIMG_PID  || NIXIMG_RC=$?
-
-          echo "fmt=$([ $FMT_RC -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
-          echo "check=$([ $CHECK_RC -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
-          echo "build=$([ $BUILD_RC -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
-          echo "niximg=$([ $NIXIMG_RC -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
-
-          [ $FMT_RC -eq 0 ] && [ $CHECK_RC -eq 0 ] && [ $BUILD_RC -eq 0 ] && [ $NIXIMG_RC -eq 0 ]
+      - name: Build OCI image
+        run: nix build .#oci-prod
 
       - name: Push to GHCR
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.checks.outcome == 'success'
-        env:
-          REGISTRY_AUTH_FILE: /tmp/skopeo-auth.json
         run: |
+          SKOPEO=$(nix build nixpkgs#skopeo --print-out-paths --no-link)
+          IMAGE="ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')"
+          SHA="${GITHUB_SHA::7}"
+
           echo "${{ secrets.GITHUB_TOKEN }}" | \
-            nix run .#skopeo $NIX_FLAGS -- login $REGISTRY -u ${{ github.actor }} --password-stdin
+            ${SKOPEO}/bin/skopeo login ghcr.io -u "${{ github.actor }}" --password-stdin
 
-          IMG=$(nix build .#oci-prod $NIX_FLAGS --print-out-paths --no-link)
-          REPO="${IMAGE_NAME,,}"
-          SHORT="${GITHUB_SHA:0:7}"
+          ${SKOPEO}/bin/skopeo copy oci-archive:./result "docker://${IMAGE}:${SHA}"
+          ${SKOPEO}/bin/skopeo copy oci-archive:./result "docker://${IMAGE}:latest"
 
-          nix run .#skopeo $NIX_FLAGS -- --insecure-policy copy \
-            "nix:$IMG" "docker://${REGISTRY}/${REPO}:${SHORT}"
-          nix run .#skopeo $NIX_FLAGS -- --insecure-policy copy \
-            "nix:$IMG" "docker://${REGISTRY}/${REPO}:latest"
-
-      - name: Deploy to perturabo (nix-snapshotter)
-        id: deploy
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.checks.outcome == 'success'
+      - name: Deploy
         env:
           SSH_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
         run: |
-          if [ -z "$SSH_KEY" ]; then
-            echo "SSH_PRIVATE_KEY secret not set — skipping deploy"
-            echo "deployed=skipped" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          IMAGE_REF=$(cat $(nix build .#nix-image-ref $NIX_FLAGS --print-out-paths --no-link))
-          echo "Image reference: $IMAGE_REF"
-
-          MANIFEST=$(sed "s|__NIX_IMAGE__|$IMAGE_REF|" k8s/deployment.yaml)
-
           eval "$(ssh-agent -s)"
           ssh-add - <<< "$SSH_KEY"
 
-          echo "$MANIFEST" | ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+          IMAGE="ghcr.io/$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')"
+          SHA="${GITHUB_SHA::7}"
+
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
             -p ${{ secrets.SSH_PORT }} \
             ${{ secrets.SSH_USERNAME }}@${{ secrets.SSH_HOST }} \
-            "kubectl apply -f -"
-
-          echo "deployed=success" >> "$GITHUB_OUTPUT"
-
-      - name: Summary
-        if: always()
-        run: |
-          FMT="${{ steps.checks.outputs.fmt }}"
-          CHK="${{ steps.checks.outputs.check }}"
-          BLD="${{ steps.checks.outputs.build }}"
-          NIXIMG="${{ steps.checks.outputs.niximg }}"
-          DEPLOY="${{ steps.deploy.outputs.deployed }}"
-
-          {
-            echo "## CI/CD Results"
-            echo ""
-            echo "| Check | Result |"
-            echo "|-------|--------|"
-            echo "| Format | $([ "$FMT" = success ] && echo '✅' || echo '❌') |"
-            echo "| Flake Check | $([ "$CHK" = success ] && echo '✅' || echo '❌') |"
-            echo "| Build OCI | $([ "$BLD" = success ] && echo '✅' || echo '❌') |"
-            echo "| Build nix-image | $([ "$NIXIMG" = success ] && echo '✅' || echo '❌') |"
-            if [ -n "$DEPLOY" ]; then
-              echo "| Deploy perturabo | $([ "$DEPLOY" = success ] && echo '✅' || echo "⚠️ $DEPLOY") |"
-            fi
-          } >> "$GITHUB_STEP_SUMMARY"
+            bash -s "${IMAGE}" "${SHA}" << 'DEPLOY_EOF'
+          set -e
+          IMG="$1:$2"
+          kubectl set image deployment/python-uv-nix -n default app=${IMG}
+          kubectl rollout status deployment/python-uv-nix -n default --timeout=120s
+          echo "Deployed ${IMG}"
+          DEPLOY_EOF

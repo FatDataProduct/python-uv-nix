@@ -31,7 +31,7 @@ container:
 
 # Push OCI image to registry
 push registry:
-    skopeo --insecure-policy copy "nix:$(nix build .#oci-prod --print-out-paths --no-link)" "docker://{{registry}}"
+    skopeo copy "oci-archive:$(nix build .#oci-prod --print-out-paths --no-link)" "docker://{{registry}}"
 
 # Add Python dependencies and update lock
 add +packages:
