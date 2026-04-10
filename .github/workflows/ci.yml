@@ -6,6 +6,11 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  checks: write
+  contents: read
+  packages: write
+
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
@@ -13,63 +18,104 @@ env:
 
 jobs:
   ci:
-    name: "🔍 Check & Build"
+    name: "⚡ CI/CD"
     runs-on: [nix]
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Check, lint & build
+      - name: Checkout
         run: |
-          nix flake check --no-build $NIX_FLAGS &
-          CHECK_PID=$!
+          git init -q
+          git remote add origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --depth=1 -q origin "$GITHUB_SHA"
+          git checkout -q FETCH_HEAD
+
+      - name: Prepare checks
+        uses: dflydev/check-runs-action@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          checks: |
+            [
+              { "id": "fmt",   "name": "✅ Format" },
+              { "id": "check", "name": "✅ Flake Check" },
+              { "id": "build", "name": "📦 Build OCI" }
+            ]
+          status: "in_progress"
+
+      - name: Run checks
+        id: checks
+        run: |
           nix fmt $NIX_FLAGS -- --ci &
           FMT_PID=$!
+          nix flake check --no-build $NIX_FLAGS &
+          CHECK_PID=$!
           nix build .#oci-prod $NIX_FLAGS &
           BUILD_PID=$!
-          wait $CHECK_PID
-          wait $FMT_PID
-          wait $BUILD_PID
 
-      - name: Build summary
-        run: |
-          echo "## 📦 OCI Image" >> $GITHUB_STEP_SUMMARY
-          SIZE=$(nix path-info -Sh ./result 2>/dev/null | awk '{print $2}' || echo "?")
-          echo "Closure size: **$SIZE**" >> $GITHUB_STEP_SUMMARY
+          FMT_RC=0;   wait $FMT_PID   || FMT_RC=$?
+          CHECK_RC=0;  wait $CHECK_PID  || CHECK_RC=$?
+          BUILD_RC=0;  wait $BUILD_PID  || BUILD_RC=$?
 
-  push:
-    name: "🚀 Push to GHCR"
-    runs-on: [nix]
-    needs: ci
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    permissions:
-      contents: read
-      packages: write
-    env:
-      REGISTRY_AUTH_FILE: /tmp/skopeo-auth.json
-    steps:
-      - uses: actions/checkout@v4
+          echo "fmt=$([ $FMT_RC -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
+          echo "check=$([ $CHECK_RC -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
+          echo "build=$([ $BUILD_RC -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
 
-      - name: Login to GHCR
+          [ $FMT_RC -eq 0 ] && [ $CHECK_RC -eq 0 ] && [ $BUILD_RC -eq 0 ]
+
+      - name: Report ✅ Format
+        if: always()
+        uses: dflydev/check-runs-action@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          id: fmt
+          conclusion: ${{ steps.checks.outputs.fmt || 'failure' }}
+
+      - name: Report ✅ Flake Check
+        if: always()
+        uses: dflydev/check-runs-action@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          id: check
+          conclusion: ${{ steps.checks.outputs.check || 'failure' }}
+
+      - name: Report 📦 Build OCI
+        if: always()
+        uses: dflydev/check-runs-action@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          id: build
+          conclusion: ${{ steps.checks.outputs.build || 'failure' }}
+
+      - name: Push to GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.checks.outcome == 'success'
+        env:
+          REGISTRY_AUTH_FILE: /tmp/skopeo-auth.json
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | \
-            nix run .#skopeo $NIX_FLAGS -- login ${{ env.REGISTRY }} \
-              -u ${{ github.actor }} --password-stdin
+            nix run .#skopeo $NIX_FLAGS -- login $REGISTRY -u ${{ github.actor }} --password-stdin
 
-      - name: Push image
-        run: |
           IMG=$(nix build .#oci-prod $NIX_FLAGS --print-out-paths --no-link)
-          SHA="${{ github.sha }}"
-          SHORT="${SHA:0:7}"
           REPO="${IMAGE_NAME,,}"
+          SHORT="${GITHUB_SHA:0:7}"
 
           nix run .#skopeo $NIX_FLAGS -- --insecure-policy copy \
-            "nix:$IMG" \
-            "docker://${{ env.REGISTRY }}/${REPO}:${SHORT}"
-
+            "nix:$IMG" "docker://${REGISTRY}/${REPO}:${SHORT}"
           nix run .#skopeo $NIX_FLAGS -- --insecure-policy copy \
-            "nix:$IMG" \
-            "docker://${{ env.REGISTRY }}/${REPO}:latest"
+            "nix:$IMG" "docker://${REGISTRY}/${REPO}:latest"
 
-          echo "## 🚀 Pushed to GHCR" >> $GITHUB_STEP_SUMMARY
-          echo "- \`${{ env.REGISTRY }}/${REPO}:${SHORT}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- \`${{ env.REGISTRY }}/${REPO}:latest\`" >> $GITHUB_STEP_SUMMARY
+      - name: Summary
+        if: always()
+        run: |
+          FMT="${{ steps.checks.outputs.fmt }}"
+          CHK="${{ steps.checks.outputs.check }}"
+          BLD="${{ steps.checks.outputs.build }}"
+
+          echo "## CI/CD Results" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Check | Result |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-------|--------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Format | $([ "$FMT" = success ] && echo '✅' || echo '❌') |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Flake Check | $([ "$CHK" = success ] && echo '✅' || echo '❌') |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Build OCI | $([ "$BLD" = success ] && echo '✅' || echo '❌') |" >> "$GITHUB_STEP_SUMMARY"
+
+          SIZE=$(nix path-info -Sh ./result 2>/dev/null | awk '{print $2}' || echo "N/A")
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "📦 OCI closure size: **$SIZE**" >> "$GITHUB_STEP_SUMMARY"
