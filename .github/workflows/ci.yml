@@ -155,8 +155,13 @@ jobs:
             "${SSH_DEPLOY_USER}@${SSH_DEPLOY_HOST}" \
             "set -e; \
              kubectl --context front apply -f - -n default; \
+             kubectl --context front delete deployment/app-std -n default --ignore-not-found; \
              kubectl --context front set image deployment/app-nix -n default app=${IMG_NIX}; \
-             kubectl --context front rollout status deployment/app-nix -n default --timeout=300s || echo 'WARN: app-nix rollout not ready (no matching nodes / image pull?)'; \
+             if ! kubectl --context front rollout status deployment/app-nix -n default --timeout=300s; then \
+               echo 'WARN: app-nix rollout not ready, recycling nix pods once (containerd/nix-snapshotter race?)'; \
+               kubectl --context front delete pod -n default -l app=python-uv-nix,variant=nix --ignore-not-found; \
+               kubectl --context front rollout status deployment/app-nix -n default --timeout=300s || echo 'WARN: app-nix rollout still not ready (checkpoint race / image pull?)'; \
+             fi; \
              echo \"Deployed app-nix on front (perturabo)=${IMG_NIX}\"" \
             < k8s/deployment-back.yaml
 
@@ -195,6 +200,7 @@ jobs:
             "${SSH_DEPLOY_USER}@${SSH_DEPLOY_HOST}" \
             "set -e; \
              kubectl --context back apply -f - -n default; \
+             kubectl --context back delete deployment/app-nix -n default --ignore-not-found; \
              kubectl --context back set image deployment/app-std -n default app=${IMG_STD}; \
              kubectl --context back rollout status deployment/app-std -n default --timeout=300s; \
              echo \"Deployed app-std on back (angron)=${IMG_STD}\"" \
