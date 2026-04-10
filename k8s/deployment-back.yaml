@@ -1,8 +1,7 @@
-# Кластер back (прод: angron): nix-snapshotter образ (app-nix) + Service
-# kubectl --context back apply -f k8s/deployment-back.yaml
+# nix-snapshotter (app-nix) — кластер perturabo: kubectl --context front apply -f k8s/deployment-back.yaml
 #
 # Под не уйдёт из Pending, пока на кластере нет ноды с меткой:
-#   kubectl label node <имя-ноды> nix-snapshotter=true --context back --overwrite
+#   kubectl label node <имя-ноды> nix-snapshotter=true --context front --overwrite
 apiVersion: v1
 kind: Service
 metadata:

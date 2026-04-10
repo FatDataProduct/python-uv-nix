@@ -1,5 +1,6 @@
 # All-in-one: оба Deployment + Service (один k3s, например локально)
-# Прод: раздельно — deployment-front.yaml (--context front) и deployment-back.yaml (--context back)
+# Прод: deployment-back.yaml → kubectl --context front (perturabo, app-nix);
+#       deployment-front.yaml → kubectl --context back (angron, app-std).
 #
 # app-std  — n2c image, runs on any node
 # app-nix  — nix-snapshotter image, only on nodes with label nix-snapshotter=true

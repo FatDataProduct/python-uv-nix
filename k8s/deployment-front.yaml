@@ -1,5 +1,5 @@
-# Кластер front (прод: perturabo): n2c образ (app-std) + Service
-# kubectl --context front apply -f k8s/deployment-front.yaml
+# n2c (app-std) — кластер angron: kubectl --context back apply -f k8s/deployment-front.yaml
+# (имя файла «front» историческое; в проде этот манифест идёт на контекст back.)
 apiVersion: v1
 kind: Service
 metadata:

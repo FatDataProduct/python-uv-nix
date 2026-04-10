@@ -122,8 +122,8 @@ jobs:
           ${SKOPEO}/bin/skopeo --insecure-policy copy \
             "oci-archive:${IMG_NIX}" "docker://${REGISTRY}/${REPO}:latest-nix"
 
-      # Сначала back (angron / app-nix): иначе при падении шага front этот шаг не выполнялся бы вообще.
-      - name: Deploy app-nix (back cluster)
+      # Сначала app-nix на kubectl front (perturabo): иначе при падении шага app-std этот шаг не выполнялся бы.
+      - name: Deploy app-nix (perturabo, kubectl front)
         id: deploy_nix
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.checks.outcome == 'success'
         env:
@@ -133,7 +133,7 @@ jobs:
           SSH_DEPLOY_PORT: ${{ secrets.SSH_PORT }}
         run: |
           if [ -z "$SSHPASS" ]; then
-            echo "SSH_PRIVATE_KEY secret not set — skipping back deploy"
+            echo "SSH_PRIVATE_KEY secret not set — skipping app-nix deploy"
             echo "deploy_nix=skipped" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -154,15 +154,15 @@ jobs:
             -p "$PORT" \
             "${SSH_DEPLOY_USER}@${SSH_DEPLOY_HOST}" \
             "set -e; \
-             kubectl --context back apply -f - -n default; \
-             kubectl --context back set image deployment/app-nix -n default app=${IMG_NIX}; \
-             kubectl --context back rollout status deployment/app-nix -n default --timeout=300s || echo 'WARN: app-nix rollout not ready (no matching nodes / image pull?)'; \
-             echo Deployed back app-nix=${IMG_NIX}" \
+             kubectl --context front apply -f - -n default; \
+             kubectl --context front set image deployment/app-nix -n default app=${IMG_NIX}; \
+             kubectl --context front rollout status deployment/app-nix -n default --timeout=300s || echo 'WARN: app-nix rollout not ready (no matching nodes / image pull?)'; \
+             echo Deployed app-nix on front (perturabo)=${IMG_NIX}" \
             < k8s/deployment-back.yaml
 
           echo "deploy_nix=success" >> "$GITHUB_OUTPUT"
 
-      - name: Deploy app-std (front cluster)
+      - name: Deploy app-std (angron, kubectl back)
         id: deploy_std
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.checks.outcome == 'success'
         env:
@@ -173,7 +173,7 @@ jobs:
           SSH_DEPLOY_PORT: ${{ secrets.SSH_PORT }}
         run: |
           if [ -z "$SSHPASS" ]; then
-            echo "SSH_PRIVATE_KEY secret not set — skipping front deploy"
+            echo "SSH_PRIVATE_KEY secret not set — skipping app-std deploy"
             echo "deploy_std=skipped" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -194,10 +194,10 @@ jobs:
             -p "$PORT" \
             "${SSH_DEPLOY_USER}@${SSH_DEPLOY_HOST}" \
             "set -e; \
-             kubectl --context front apply -f - -n default; \
-             kubectl --context front set image deployment/app-std -n default app=${IMG_STD}; \
-             kubectl --context front rollout status deployment/app-std -n default --timeout=300s; \
-             echo Deployed front app-std=${IMG_STD}" \
+             kubectl --context back apply -f - -n default; \
+             kubectl --context back set image deployment/app-std -n default app=${IMG_STD}; \
+             kubectl --context back rollout status deployment/app-std -n default --timeout=300s; \
+             echo Deployed app-std on back (angron)=${IMG_STD}" \
             < k8s/deployment-front.yaml
 
           echo "deploy_std=success" >> "$GITHUB_OUTPUT"
@@ -221,10 +221,10 @@ jobs:
             echo "| Flake Check | $([ "$CHK" = success ] && echo '✅' || echo '❌') |"
             echo "| Build OCI | $([ "$BLD" = success ] && echo '✅' || echo '❌') |"
             echo "| Build oci-nix | $([ "$NIXIMG" = success ] && echo '✅' || echo '❌') |"
-            if [ -n "$DSTD" ]; then
-              echo "| Deploy app-std (front) | $([ "$DSTD" = success ] && echo '✅' || echo "⚠️ $DSTD") |"
-            fi
             if [ -n "$DNIX" ]; then
-              echo "| Deploy app-nix (back) | $([ "$DNIX" = success ] && echo '✅' || echo "⚠️ $DNIX") |"
+              echo "| Deploy app-nix (front / perturabo) | $([ "$DNIX" = success ] && echo '✅' || echo "⚠️ $DNIX") |"
+            fi
+            if [ -n "$DSTD" ]; then
+              echo "| Deploy app-std (back / angron) | $([ "$DSTD" = success ] && echo '✅' || echo "⚠️ $DSTD") |"
             fi
           } >> "$GITHUB_STEP_SUMMARY"

@@ -38,19 +38,19 @@ Standard `uv` commands work as usual: `uv add`, `uv sync`, `uv run`, etc.
 |-----|---------|------|
 | **Checks** | push, PR | format, flake check, `oci-prod` + `oci-nix` builds (parallel) |
 | **Push GHCR** | merge to `main` | std + `-nix` теги |
-| **Deploy** | merge to `main` | SSH: сначала **back** (`app-nix` → **angron**), затем **front** (`app-std` → **perturabo**), чтобы сбой деплоя на front не отменял шаг для back |
+| **Deploy** | merge to `main` | SSH: сначала **app-nix** на `kubectl --context front` (**perturabo**, nix-snapshotter), затем **app-std** на `kubectl --context back` (**angron**, n2c), чтобы сбой второго шага не отменял выкладку nix |
 
-Раннеры: `runs-on: [nix]` (nspawn на perturabo — это **машина с GitHub runners**, не то же самое, что k8s-контекст `front`).
+Раннеры: `runs-on: [nix]` (nspawn на физической машине **perturabo** — GitHub runners; это не обязано совпадать с тем, куда указывает kube-контекст `front` в merge kubeconfig, но у вас nix-образ как раз на perturabo).
 
-**Имена кластеров:** в проде **perturabo** = Kubernetes за контекстом **`front`** (`app-std`, обычный OCI). **angron** = за контекстом **`back`** (`app-nix`, nix-snapshotter).
+**Имена кластеров и контексты:** **perturabo** = kube **`front`** → **`app-nix`** (nix-snapshotter). **angron** = kube **`back`** → **`app-std`** (n2c). Файлы манифестов названы наоборот: `deployment-back.yaml` = app-nix на **front**; `deployment-front.yaml` = app-std на **back**.
 
 Контейнер слушает **порт 8000** (переменная `PORT`), как в `Service` из `k8s/deployment-*.yaml`.
 
-На кластере **back (angron)** у `app-nix` в манифесте `nodeSelector: nix-snapshotter: "true"`. Пока ни одна нода не помечена, под останется в **Pending**:
+На **perturabo** (`kubectl --context front`) у `app-nix` в манифесте `nodeSelector: nix-snapshotter: "true"`. Пока ни одна нода не помечена, под останется в **Pending**:
 
 ```bash
-kubectl get nodes --context back
-kubectl label node <имя-ноды> nix-snapshotter=true --context back --overwrite
+kubectl get nodes --context front
+kubectl label node <имя-ноды> nix-snapshotter=true --context front --overwrite
 ```
 
 ### Секреты GitHub Actions (деплой)
@@ -67,8 +67,8 @@ kubectl label node <имя-ноды> nix-snapshotter=true --context back --overw
 На сервере должны работать, например:
 
 ```bash
-kubectl --context front get nodes
-kubectl --context back get nodes
+kubectl --context front get nodes   # perturabo (app-nix)
+kubectl --context back get nodes    # angron (app-std)
 ```
 
 На jump-хосте в `/etc/ssh/sshd_config` должна быть разрешена аутентификация по паролю (`PasswordAuthentication yes`), иначе `sshpass` не подключится.

@@ -23,7 +23,7 @@ class _HealthHandler(BaseHTTPRequestHandler):
 async def main_async() -> None:
     with logfire.span("app-startup"):
         console.print("[bold green]Hello from app![/]")
-        console.print("[dim]multicluster: front=perturabo (std), back=angr (nix)[/]")
+        console.print("[dim]multicluster: kubectl front=perturabo (nix), back=angron (std n2c)[/]")
     port = int(os.environ.get("PORT", "8000"))
     server = ThreadingHTTPServer(("0.0.0.0", port), _HealthHandler)
     await anyio.to_thread.run_sync(server.serve_forever)
