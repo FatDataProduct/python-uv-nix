@@ -104,6 +104,31 @@ jobs:
           nix run .#skopeo $NIX_FLAGS -- --insecure-policy copy \
             "nix:$IMG" "docker://${REGISTRY}/${REPO}:latest"
 
+      - name: Deploy to perturabo (nix-snapshotter)
+        id: deploy
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.checks.outcome == 'success'
+        env:
+          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
+        run: |
+          if [ -z "$KUBE_CONFIG" ]; then
+            echo "KUBE_CONFIG secret not set — skipping deploy"
+            echo "deployed=skipped" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          IMAGE_REF=$(cat $(nix build .#nix-image-ref $NIX_FLAGS --print-out-paths --no-link))
+          echo "Image reference: $IMAGE_REF"
+
+          KUBECONFIG_FILE=$(mktemp)
+          echo "$KUBE_CONFIG" | base64 -d > "$KUBECONFIG_FILE"
+          trap "rm -f $KUBECONFIG_FILE" EXIT
+
+          sed "s|__NIX_IMAGE__|$IMAGE_REF|" k8s/deployment.yaml | \
+            nix shell nixpkgs#kubectl $NIX_FLAGS -c kubectl \
+              --kubeconfig "$KUBECONFIG_FILE" apply -f -
+
+          echo "deployed=success" >> "$GITHUB_OUTPUT"
+
       - name: Summary
         if: always()
         run: |
@@ -111,6 +136,7 @@ jobs:
           CHK="${{ steps.checks.outputs.check }}"
           BLD="${{ steps.checks.outputs.build }}"
           NIXIMG="${{ steps.checks.outputs.niximg }}"
+          DEPLOY="${{ steps.deploy.outputs.deployed }}"
 
           {
             echo "## CI/CD Results"
@@ -121,4 +147,7 @@ jobs:
             echo "| Flake Check | $([ "$CHK" = success ] && echo '✅' || echo '❌') |"
             echo "| Build OCI | $([ "$BLD" = success ] && echo '✅' || echo '❌') |"
             echo "| Build nix-image | $([ "$NIXIMG" = success ] && echo '✅' || echo '❌') |"
+            if [ -n "$DEPLOY" ]; then
+              echo "| Deploy perturabo | $([ "$DEPLOY" = success ] && echo '✅' || echo "⚠️ $DEPLOY") |"
+            fi
           } >> "$GITHUB_STEP_SUMMARY"

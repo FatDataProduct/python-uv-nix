@@ -78,25 +78,8 @@
         # nix-snapshotter image for NixOS k3s nodes (per-package dedup via snix)
         nix-image = nixImage;
 
-        # Test pod manifest referencing the nix-snapshotter image store path
-        nix-image-pod = pkgs.writeText "nix-image-pod.json" (builtins.toJSON {
-          apiVersion = "v1";
-          kind = "Pod";
-          metadata = {
-            name = "test-nix-snapshotter-app";
-            labels.app = "test-nix-snapshotter";
-          };
-          spec = {
-            nodeSelector."nix-snapshotter" = "true";
-            restartPolicy = "Never";
-            containers = [
-              {
-                name = "app";
-                image = nixImage.image;
-              }
-            ];
-          };
-        });
+        # Image reference for CI/CD substitution into k8s manifests
+        nix-image-ref = pkgs.writeText "nix-image-ref.txt" nixImage.image;
       };
     };
 }
