@@ -25,13 +25,21 @@ fmt:
 check:
     nix flake check
 
-# Build OCI container image
+# Build standard n2c OCI image
 container:
     nix build .#oci-prod
 
-# Push OCI image to registry
+# Build nix-snapshotter OCI image
+container-nix:
+    nix build .#oci-nix
+
+# Push standard image to registry (nix: transport)
 push registry:
-    skopeo copy "oci-archive:$(nix build .#oci-prod --print-out-paths --no-link)" "docker://{{registry}}"
+    nix run .#skopeo -- --insecure-policy copy "nix:$(nix build .#oci-prod --print-out-paths --no-link)" "docker://{{registry}}"
+
+# Push nix-snapshotter image to registry (oci-archive: transport)
+push-nix registry:
+    skopeo --insecure-policy copy "oci-archive:$(nix build .#oci-nix --print-out-paths --no-link)" "docker://{{registry}}"
 
 # Add Python dependencies and update lock
 add +packages:

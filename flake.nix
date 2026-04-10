@@ -19,6 +19,10 @@
       inputs.uv2nix.follows = "uv2nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    nix2container = {
+      url = "github:nlewo/nix2container";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     nix-snapshotter = {
       url = "github:pdtpartners/nix-snapshotter";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -31,6 +35,13 @@
       url = "github:numtide/treefmt-nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+  };
+
+  nixConfig = {
+    extra-substituters = [ "https://nix2container.cachix.org" ];
+    extra-trusted-public-keys = [
+      "nix2container.cachix.org-1:WVlhaNzWoiLXfHMjrgCKJhfg647rVOqLEjg+mH4XTXQ="
+    ];
   };
 
   outputs =

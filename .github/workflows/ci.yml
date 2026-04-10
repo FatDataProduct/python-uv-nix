@@ -14,6 +14,7 @@ permissions:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
+  NIX_FLAGS: "--accept-flake-config"
 
 jobs:
   ci:
@@ -54,6 +55,7 @@ jobs:
           FMT_CID=$(create_check "✅ Format")
           CHECK_CID=$(create_check "✅ Flake Check")
           BUILD_CID=$(create_check "📦 Build OCI")
+          NIXIMG_CID=$(create_check "📦 Build oci-nix")
 
           run_task() {
             local cid=$1; shift
@@ -64,41 +66,50 @@ jobs:
             fi
           }
 
-          run_task "$FMT_CID" nix fmt -- --ci &
+          run_task "$FMT_CID" nix fmt $NIX_FLAGS -- --ci &
           FMT_PID=$!
-          run_task "$CHECK_CID" nix flake check --no-build &
+          run_task "$CHECK_CID" nix flake check --no-build $NIX_FLAGS &
           CHECK_PID=$!
-          run_task "$BUILD_CID" nix build .#oci-prod &
+          run_task "$BUILD_CID" nix build .#oci-prod $NIX_FLAGS &
           BUILD_PID=$!
+          run_task "$NIXIMG_CID" nix build .#oci-nix $NIX_FLAGS &
+          NIXIMG_PID=$!
 
           FMT_RC=0;    wait $FMT_PID    || FMT_RC=$?
           CHECK_RC=0;   wait $CHECK_PID   || CHECK_RC=$?
           BUILD_RC=0;   wait $BUILD_PID   || BUILD_RC=$?
+          NIXIMG_RC=0;  wait $NIXIMG_PID  || NIXIMG_RC=$?
 
           echo "fmt=$([ $FMT_RC -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
           echo "check=$([ $CHECK_RC -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
           echo "build=$([ $BUILD_RC -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
+          echo "niximg=$([ $NIXIMG_RC -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
 
-          [ $FMT_RC -eq 0 ] && [ $CHECK_RC -eq 0 ] && [ $BUILD_RC -eq 0 ]
+          [ $FMT_RC -eq 0 ] && [ $CHECK_RC -eq 0 ] && [ $BUILD_RC -eq 0 ] && [ $NIXIMG_RC -eq 0 ]
 
       - name: Push to GHCR
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.checks.outcome == 'success'
         env:
           REGISTRY_AUTH_FILE: /tmp/skopeo-auth.json
         run: |
-          SKOPEO=$(nix build nixpkgs#skopeo.out --print-out-paths --no-link)
-
-          echo "${{ secrets.GITHUB_TOKEN }}" | \
-            ${SKOPEO}/bin/skopeo login $REGISTRY -u ${{ github.actor }} --password-stdin
-
-          IMG=$(nix build .#oci-prod --print-out-paths --no-link)
           REPO="${IMAGE_NAME,,}"
           SHORT="${GITHUB_SHA:0:7}"
 
+          echo "${{ secrets.GITHUB_TOKEN }}" | \
+            nix run .#skopeo $NIX_FLAGS -- login $REGISTRY -u ${{ github.actor }} --password-stdin
+
+          IMG_STD=$(nix build .#oci-prod $NIX_FLAGS --print-out-paths --no-link)
+          nix run .#skopeo $NIX_FLAGS -- --insecure-policy copy \
+            "nix:${IMG_STD}" "docker://${REGISTRY}/${REPO}:${SHORT}"
+          nix run .#skopeo $NIX_FLAGS -- --insecure-policy copy \
+            "nix:${IMG_STD}" "docker://${REGISTRY}/${REPO}:latest"
+
+          SKOPEO=$(nix build nixpkgs#skopeo.out $NIX_FLAGS --print-out-paths --no-link)
+          IMG_NIX=$(nix build .#oci-nix $NIX_FLAGS --print-out-paths --no-link)
           ${SKOPEO}/bin/skopeo --insecure-policy copy \
-            "oci-archive:${IMG}" "docker://${REGISTRY}/${REPO}:${SHORT}"
+            "oci-archive:${IMG_NIX}" "docker://${REGISTRY}/${REPO}:${SHORT}-nix"
           ${SKOPEO}/bin/skopeo --insecure-policy copy \
-            "oci-archive:${IMG}" "docker://${REGISTRY}/${REPO}:latest"
+            "oci-archive:${IMG_NIX}" "docker://${REGISTRY}/${REPO}:latest-nix"
 
       - name: Deploy
         id: deploy
@@ -114,9 +125,10 @@ jobs:
 
           REPO="${IMAGE_NAME,,}"
           SHORT="${GITHUB_SHA:0:7}"
-          IMG="${REGISTRY}/${REPO}:${SHORT}"
+          IMG_STD="${REGISTRY}/${REPO}:${SHORT}"
+          IMG_NIX="${REGISTRY}/${REPO}:${SHORT}-nix"
 
-          OPENSSH=$(nix build nixpkgs#openssh.out --print-out-paths --no-link)
+          OPENSSH=$(nix build nixpkgs#openssh.out $NIX_FLAGS --print-out-paths --no-link)
           export PATH="${OPENSSH}/bin:${PATH}"
 
           eval "$(ssh-agent -s)"
@@ -125,7 +137,12 @@ jobs:
           ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
             -p ${{ secrets.SSH_PORT }} \
             ${{ secrets.SSH_USERNAME }}@${{ secrets.SSH_HOST }} \
-            "set -e; kubectl set image deployment/python-uv-nix -n default app=${IMG}; kubectl rollout status deployment/python-uv-nix -n default --timeout=120s; echo Deployed ${IMG}"
+            "set -e; \
+             kubectl set image deployment/app-std -n default app=${IMG_STD}; \
+             kubectl set image deployment/app-nix -n default app=${IMG_NIX}; \
+             kubectl rollout status deployment/app-std -n default --timeout=120s; \
+             kubectl rollout status deployment/app-nix -n default --timeout=120s; \
+             echo Deployed std=${IMG_STD} nix=${IMG_NIX}"
 
           echo "deployed=success" >> "$GITHUB_OUTPUT"
 
@@ -135,6 +152,7 @@ jobs:
           FMT="${{ steps.checks.outputs.fmt }}"
           CHK="${{ steps.checks.outputs.check }}"
           BLD="${{ steps.checks.outputs.build }}"
+          NIXIMG="${{ steps.checks.outputs.niximg }}"
           DEPLOY="${{ steps.deploy.outputs.deployed }}"
 
           {
@@ -145,6 +163,7 @@ jobs:
             echo "| Format | $([ "$FMT" = success ] && echo '✅' || echo '❌') |"
             echo "| Flake Check | $([ "$CHK" = success ] && echo '✅' || echo '❌') |"
             echo "| Build OCI | $([ "$BLD" = success ] && echo '✅' || echo '❌') |"
+            echo "| Build oci-nix | $([ "$NIXIMG" = success ] && echo '✅' || echo '❌') |"
             if [ -n "$DEPLOY" ]; then
               echo "| Deploy | $([ "$DEPLOY" = success ] && echo '✅' || echo "⚠️ $DEPLOY") |"
             fi
