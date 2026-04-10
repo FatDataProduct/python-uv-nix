@@ -157,7 +157,7 @@ jobs:
              kubectl --context front apply -f - -n default; \
              kubectl --context front set image deployment/app-nix -n default app=${IMG_NIX}; \
              kubectl --context front rollout status deployment/app-nix -n default --timeout=300s || echo 'WARN: app-nix rollout not ready (no matching nodes / image pull?)'; \
-             echo Deployed app-nix on front (perturabo)=${IMG_NIX}" \
+             echo \"Deployed app-nix on front (perturabo)=${IMG_NIX}\"" \
             < k8s/deployment-back.yaml
 
           echo "deploy_nix=success" >> "$GITHUB_OUTPUT"
@@ -197,7 +197,7 @@ jobs:
              kubectl --context back apply -f - -n default; \
              kubectl --context back set image deployment/app-std -n default app=${IMG_STD}; \
              kubectl --context back rollout status deployment/app-std -n default --timeout=300s; \
-             echo Deployed app-std on back (angron)=${IMG_STD}" \
+             echo \"Deployed app-std on back (angron)=${IMG_STD}\"" \
             < k8s/deployment-front.yaml
 
           echo "deploy_std=success" >> "$GITHUB_OUTPUT"
