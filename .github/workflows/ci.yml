@@ -112,22 +112,18 @@ jobs:
             exit 0
           fi
 
-          REPO="${IMAGE_NAME,,}"
-          SHORT="${GITHUB_SHA:0:7}"
-          IMG="${REGISTRY}/${REPO}:${SHORT}"
+          export REPO="${IMAGE_NAME,,}"
+          export SHORT="${GITHUB_SHA:0:7}"
+          export IMG="${REGISTRY}/${REPO}:${SHORT}"
 
-          eval "$(ssh-agent -s)"
-          ssh-add - <<< "$SSH_KEY"
-
-          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            -p ${{ secrets.SSH_PORT }} \
-            ${{ secrets.SSH_USERNAME }}@${{ secrets.SSH_HOST }} \
-            bash -s "${IMG}" << 'DEPLOY_EOF'
-          set -e
-          kubectl set image deployment/python-uv-nix -n default app=$1
-          kubectl rollout status deployment/python-uv-nix -n default --timeout=120s
-          echo "Deployed $1"
-          DEPLOY_EOF
+          nix-shell -p openssh --run '
+            eval "$(ssh-agent -s)"
+            ssh-add - <<< "$SSH_KEY"
+            ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+              -p ${{ secrets.SSH_PORT }} \
+              ${{ secrets.SSH_USERNAME }}@${{ secrets.SSH_HOST }} \
+              "set -e; kubectl set image deployment/python-uv-nix -n default app=${IMG}; kubectl rollout status deployment/python-uv-nix -n default --timeout=120s; echo Deployed ${IMG}"
+          '
 
           echo "deployed=success" >> "$GITHUB_OUTPUT"
 
