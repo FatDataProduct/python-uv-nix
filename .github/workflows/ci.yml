@@ -122,7 +122,7 @@ jobs:
           ${SKOPEO}/bin/skopeo --insecure-policy copy \
             "oci-archive:${IMG_NIX}" "docker://${REGISTRY}/${REPO}:latest-nix"
 
-      # Сначала back (perturabo): иначе при падении front этот шаг не выполнялся бы вообще.
+      # Сначала back (angron / app-nix): иначе при падении шага front этот шаг не выполнялся бы вообще.
       - name: Deploy app-nix (back cluster)
         id: deploy_nix
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.checks.outcome == 'success'

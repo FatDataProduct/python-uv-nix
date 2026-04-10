@@ -1,4 +1,4 @@
-# Back cluster: nix-snapshotter образ (app-nix) + Service
+# Кластер back (прод: angron): nix-snapshotter образ (app-nix) + Service
 # kubectl --context back apply -f k8s/deployment-back.yaml
 #
 # Под не уйдёт из Pending, пока на кластере нет ноды с меткой:

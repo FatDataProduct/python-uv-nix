@@ -1,4 +1,4 @@
-# Front cluster: n2c образ (app-std) + Service
+# Кластер front (прод: perturabo): n2c образ (app-std) + Service
 # kubectl --context front apply -f k8s/deployment-front.yaml
 apiVersion: v1
 kind: Service

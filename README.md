@@ -38,13 +38,15 @@ Standard `uv` commands work as usual: `uv add`, `uv sync`, `uv run`, etc.
 |-----|---------|------|
 | **Checks** | push, PR | format, flake check, `oci-prod` + `oci-nix` builds (parallel) |
 | **Push GHCR** | merge to `main` | std + `-nix` теги |
-| **Deploy** | merge to `main` | SSH: сначала **back** (`app-nix`, perturabo), затем **front** (`app-std`, angron), чтобы падение фронта не пропускало деплой на бэк |
+| **Deploy** | merge to `main` | SSH: сначала **back** (`app-nix` → **angron**), затем **front** (`app-std` → **perturabo**), чтобы сбой деплоя на front не отменял шаг для back |
 
-Раннеры: `runs-on: [nix]` (nspawn на perturabo, свои лейблы).
+Раннеры: `runs-on: [nix]` (nspawn на perturabo — это **машина с GitHub runners**, не то же самое, что k8s-контекст `front`).
+
+**Имена кластеров:** в проде **perturabo** = Kubernetes за контекстом **`front`** (`app-std`, обычный OCI). **angron** = за контекстом **`back`** (`app-nix`, nix-snapshotter).
 
 Контейнер слушает **порт 8000** (переменная `PORT`), как в `Service` из `k8s/deployment-*.yaml`.
 
-На кластере **back** у `app-nix` в манифесте `nodeSelector: nix-snapshotter: "true"`. Пока ни одна нода не помечена, под останется в **Pending**:
+На кластере **back (angron)** у `app-nix` в манифесте `nodeSelector: nix-snapshotter: "true"`. Пока ни одна нода не помечена, под останется в **Pending**:
 
 ```bash
 kubectl get nodes --context back
