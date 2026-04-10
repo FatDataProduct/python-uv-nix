@@ -116,7 +116,7 @@ jobs:
           SHORT="${GITHUB_SHA:0:7}"
           IMG="${REGISTRY}/${REPO}:${SHORT}"
 
-          OPENSSH=$(nix build nixpkgs#openssh --print-out-paths --no-link)
+          OPENSSH=$(nix build nixpkgs#openssh.out --print-out-paths --no-link)
           export PATH="${OPENSSH}/bin:${PATH}"
 
           eval "$(ssh-agent -s)"
