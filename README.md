@@ -49,9 +49,9 @@ Standard `uv` commands work as usual: `uv add`, `uv sync`, `uv run`, etc.
 | Secret | Значение (пример для FatData Control) |
 |--------|----------------------------------------|
 | `SSH_HOST` | `89.111.170.51` — VPS «FatData Control», Ubuntu 24.04 |
-| `SSH_USERNAME` | `root` (или пользователь с `kubectl` и тем же kubeconfig) |
+| `SSH_USERNAME` | `root` (пользователь с `kubectl` и merge kubeconfig) |
 | `SSH_PORT` | `22` |
-| `SSH_PRIVATE_KEY` | приватный ключ **только** для этого деплоя (Ed25519), публичный ключ в `~/.ssh/authorized_keys` на VPS |
+| `SSH_PRIVATE_KEY` | **пароль root** этого VPS (имя секрета историческое; в CI используется `sshpass -e`, не `ssh-add`) |
 
 На сервере должны работать, например:
 
@@ -60,7 +60,7 @@ kubectl --context front get nodes
 kubectl --context back get nodes
 ```
 
-Пароль root с панели регистратора — **не** кладите в GitHub Secrets; для CI достаточно SSH-ключа. Пароль лучше сменить, если он попадал в открытый канал.
+На jump-хосте в `/etc/ssh/sshd_config` должна быть разрешена аутентификация по паролю (`PasswordAuthentication yes`), иначе `sshpass` не подключится.
 
 Установка секретов из CLI (пример):
 
@@ -68,7 +68,7 @@ kubectl --context back get nodes
 gh secret set SSH_HOST -b"89.111.170.51" -R FatDataProduct/python-uv-nix
 gh secret set SSH_USERNAME -b"root" -R FatDataProduct/python-uv-nix
 gh secret set SSH_PORT -b"22" -R FatDataProduct/python-uv-nix
-gh secret set SSH_PRIVATE_KEY < deploy_key.pem -R FatDataProduct/python-uv-nix
+gh secret set SSH_PRIVATE_KEY -b"ВАШ_ПАРОЛЬ_ROOT" -R FatDataProduct/python-uv-nix
 ```
 
 ## Setup (without Nix)

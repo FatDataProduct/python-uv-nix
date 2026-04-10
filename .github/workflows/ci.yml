@@ -126,9 +126,10 @@ jobs:
         id: deploy_std
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.checks.outcome == 'success'
         env:
-          SSH_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          # Имя секрета историческое: здесь лежит пароль root jump-хоста (не PEM-ключ).
+          SSHPASS: ${{ secrets.SSH_PRIVATE_KEY }}
         run: |
-          if [ -z "$SSH_KEY" ]; then
+          if [ -z "$SSHPASS" ]; then
             echo "SSH_PRIVATE_KEY secret not set — skipping front deploy"
             echo "deploy_std=skipped" >> "$GITHUB_OUTPUT"
             exit 0
@@ -139,12 +140,11 @@ jobs:
           IMG_STD="${REGISTRY}/${REPO}:${SHORT}"
 
           OPENSSH=$(nix build nixpkgs#openssh.out $NIX_FLAGS --print-out-paths --no-link)
+          SSHPASS_BIN=$(nix build nixpkgs#sshpass.out $NIX_FLAGS --print-out-paths --no-link)/bin/sshpass
           export PATH="${OPENSSH}/bin:${PATH}"
 
-          eval "$(ssh-agent -s)"
-          ssh-add - <<< "$SSH_KEY"
-
-          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+          $SSHPASS_BIN -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -o PreferredAuthentications=password -o PubkeyAuthentication=no \
             -p ${{ secrets.SSH_PORT }} \
             ${{ secrets.SSH_USERNAME }}@${{ secrets.SSH_HOST }} \
             "set -e; \
@@ -159,9 +159,9 @@ jobs:
         id: deploy_nix
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.checks.outcome == 'success'
         env:
-          SSH_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSHPASS: ${{ secrets.SSH_PRIVATE_KEY }}
         run: |
-          if [ -z "$SSH_KEY" ]; then
+          if [ -z "$SSHPASS" ]; then
             echo "SSH_PRIVATE_KEY secret not set — skipping back deploy"
             echo "deploy_nix=skipped" >> "$GITHUB_OUTPUT"
             exit 0
@@ -172,12 +172,11 @@ jobs:
           IMG_NIX="${REGISTRY}/${REPO}:${SHORT}-nix"
 
           OPENSSH=$(nix build nixpkgs#openssh.out $NIX_FLAGS --print-out-paths --no-link)
+          SSHPASS_BIN=$(nix build nixpkgs#sshpass.out $NIX_FLAGS --print-out-paths --no-link)/bin/sshpass
           export PATH="${OPENSSH}/bin:${PATH}"
 
-          eval "$(ssh-agent -s)"
-          ssh-add - <<< "$SSH_KEY"
-
-          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+          $SSHPASS_BIN -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -o PreferredAuthentications=password -o PubkeyAuthentication=no \
             -p ${{ secrets.SSH_PORT }} \
             ${{ secrets.SSH_USERNAME }}@${{ secrets.SSH_HOST }} \
             "set -e; \
