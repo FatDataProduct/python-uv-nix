@@ -18,21 +18,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Nix cache
-        run: |
-          # Override systemd's shared XDG_CACHE_HOME with a per-job directory.
-          # fetcher-cache (single SQLite) stays per-job — no cross-UID contention.
-          # eval-cache + gitv3 are shared via symlinks for cross-project reuse.
-          NIX_CACHE="${RUNNER_TEMP}/nix-cache"
-          mkdir -p "$NIX_CACHE/nix"
-          echo "XDG_CACHE_HOME=$NIX_CACHE" >> "$GITHUB_ENV"
-          SHARED="/var/cache/nix-runners-shared/nix"
-          for sub in eval-cache-v6 gitv3; do
-            [ -d "$SHARED/$sub" ] && ln -sfn "$SHARED/$sub" "$NIX_CACHE/nix/$sub" || true
-          done
-          chmod a+rw "$SHARED"/fetcher-cache-v4.sqlite* 2>/dev/null || true
-          find "$SHARED/eval-cache-v6" -type f -exec chmod a+rw {} + 2>/dev/null || true
-
       - name: Check, lint & build
         run: |
           nix flake check --no-build $NIX_FLAGS &
@@ -63,18 +48,6 @@ jobs:
       REGISTRY_AUTH_FILE: /tmp/skopeo-auth.json
     steps:
       - uses: actions/checkout@v4
-
-      - name: Setup Nix cache
-        run: |
-          NIX_CACHE="${RUNNER_TEMP}/nix-cache"
-          mkdir -p "$NIX_CACHE/nix"
-          echo "XDG_CACHE_HOME=$NIX_CACHE" >> "$GITHUB_ENV"
-          SHARED="/var/cache/nix-runners-shared/nix"
-          for sub in eval-cache-v6 gitv3; do
-            [ -d "$SHARED/$sub" ] && ln -sfn "$SHARED/$sub" "$NIX_CACHE/nix/$sub" || true
-          done
-          chmod a+rw "$SHARED"/fetcher-cache-v4.sqlite* 2>/dev/null || true
-          find "$SHARED/eval-cache-v6" -type f -exec chmod a+rw {} + 2>/dev/null || true
 
       - name: Login to GHCR
         run: |
