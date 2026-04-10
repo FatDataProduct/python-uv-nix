@@ -87,23 +87,34 @@ jobs:
 
           [ $FMT_RC -eq 0 ] && [ $CHECK_RC -eq 0 ] && [ $BUILD_RC -eq 0 ] && [ $NIXIMG_RC -eq 0 ]
 
-      - name: Push to GHCR
+      - name: Login GHCR (skopeo)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.checks.outcome == 'success'
+        env:
+          REGISTRY_AUTH_FILE: /tmp/skopeo-auth.json
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | \
+            nix run .#skopeo $NIX_FLAGS -- login $REGISTRY -u ${{ github.actor }} --password-stdin
+
+      - name: Push oci-prod (std) to GHCR
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.checks.outcome == 'success'
         env:
           REGISTRY_AUTH_FILE: /tmp/skopeo-auth.json
         run: |
           REPO="${IMAGE_NAME,,}"
           SHORT="${GITHUB_SHA:0:7}"
-
-          echo "${{ secrets.GITHUB_TOKEN }}" | \
-            nix run .#skopeo $NIX_FLAGS -- login $REGISTRY -u ${{ github.actor }} --password-stdin
-
           IMG_STD=$(nix build .#oci-prod $NIX_FLAGS --print-out-paths --no-link)
           nix run .#skopeo $NIX_FLAGS -- --insecure-policy copy \
             "nix:${IMG_STD}" "docker://${REGISTRY}/${REPO}:${SHORT}"
           nix run .#skopeo $NIX_FLAGS -- --insecure-policy copy \
             "nix:${IMG_STD}" "docker://${REGISTRY}/${REPO}:latest"
 
+      - name: Push oci-nix to GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.checks.outcome == 'success'
+        env:
+          REGISTRY_AUTH_FILE: /tmp/skopeo-auth.json
+        run: |
+          REPO="${IMAGE_NAME,,}"
+          SHORT="${GITHUB_SHA:0:7}"
           SKOPEO=$(nix build nixpkgs#skopeo.out $NIX_FLAGS --print-out-paths --no-link)
           IMG_NIX=$(nix build .#oci-nix $NIX_FLAGS --print-out-paths --no-link)
           ${SKOPEO}/bin/skopeo --insecure-policy copy \
@@ -111,21 +122,53 @@ jobs:
           ${SKOPEO}/bin/skopeo --insecure-policy copy \
             "oci-archive:${IMG_NIX}" "docker://${REGISTRY}/${REPO}:latest-nix"
 
-      - name: Deploy
-        id: deploy
+      - name: Deploy app-std (front cluster)
+        id: deploy_std
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.checks.outcome == 'success'
         env:
           SSH_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
         run: |
           if [ -z "$SSH_KEY" ]; then
-            echo "SSH_PRIVATE_KEY secret not set — skipping deploy"
-            echo "deployed=skipped" >> "$GITHUB_OUTPUT"
+            echo "SSH_PRIVATE_KEY secret not set — skipping front deploy"
+            echo "deploy_std=skipped" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           REPO="${IMAGE_NAME,,}"
           SHORT="${GITHUB_SHA:0:7}"
           IMG_STD="${REGISTRY}/${REPO}:${SHORT}"
+
+          OPENSSH=$(nix build nixpkgs#openssh.out $NIX_FLAGS --print-out-paths --no-link)
+          export PATH="${OPENSSH}/bin:${PATH}"
+
+          eval "$(ssh-agent -s)"
+          ssh-add - <<< "$SSH_KEY"
+
+          ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -p ${{ secrets.SSH_PORT }} \
+            ${{ secrets.SSH_USERNAME }}@${{ secrets.SSH_HOST }} \
+            "set -e; \
+             K=\"kubectl --context front\"; \
+             \$K set image deployment/app-std -n default app=${IMG_STD}; \
+             \$K rollout status deployment/app-std -n default --timeout=120s; \
+             echo Deployed front app-std=${IMG_STD}"
+
+          echo "deploy_std=success" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy app-nix (back cluster)
+        id: deploy_nix
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.checks.outcome == 'success'
+        env:
+          SSH_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          if [ -z "$SSH_KEY" ]; then
+            echo "SSH_PRIVATE_KEY secret not set — skipping back deploy"
+            echo "deploy_nix=skipped" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          REPO="${IMAGE_NAME,,}"
+          SHORT="${GITHUB_SHA:0:7}"
           IMG_NIX="${REGISTRY}/${REPO}:${SHORT}-nix"
 
           OPENSSH=$(nix build nixpkgs#openssh.out $NIX_FLAGS --print-out-paths --no-link)
@@ -139,13 +182,11 @@ jobs:
             ${{ secrets.SSH_USERNAME }}@${{ secrets.SSH_HOST }} \
             "set -e; \
              K=\"kubectl --context back\"; \
-             \$K set image deployment/app-std -n default app=${IMG_STD}; \
              \$K set image deployment/app-nix -n default app=${IMG_NIX}; \
-             \$K rollout status deployment/app-std -n default --timeout=120s; \
-             \$K rollout status deployment/app-nix -n default --timeout=120s || echo 'WARN: app-nix rollout not ready (no nix-snapshotter nodes?)'; \
-             echo Deployed std=${IMG_STD} nix=${IMG_NIX}"
+             \$K rollout status deployment/app-nix -n default --timeout=120s || echo 'WARN: app-nix rollout not ready (no matching nodes?)'; \
+             echo Deployed back app-nix=${IMG_NIX}"
 
-          echo "deployed=success" >> "$GITHUB_OUTPUT"
+          echo "deploy_nix=success" >> "$GITHUB_OUTPUT"
 
       - name: Summary
         if: always()
@@ -154,7 +195,8 @@ jobs:
           CHK="${{ steps.checks.outputs.check }}"
           BLD="${{ steps.checks.outputs.build }}"
           NIXIMG="${{ steps.checks.outputs.niximg }}"
-          DEPLOY="${{ steps.deploy.outputs.deployed }}"
+          DSTD="${{ steps.deploy_std.outputs.deploy_std }}"
+          DNIX="${{ steps.deploy_nix.outputs.deploy_nix }}"
 
           {
             echo "## CI/CD Results"
@@ -165,7 +207,10 @@ jobs:
             echo "| Flake Check | $([ "$CHK" = success ] && echo '✅' || echo '❌') |"
             echo "| Build OCI | $([ "$BLD" = success ] && echo '✅' || echo '❌') |"
             echo "| Build oci-nix | $([ "$NIXIMG" = success ] && echo '✅' || echo '❌') |"
-            if [ -n "$DEPLOY" ]; then
-              echo "| Deploy | $([ "$DEPLOY" = success ] && echo '✅' || echo "⚠️ $DEPLOY") |"
+            if [ -n "$DSTD" ]; then
+              echo "| Deploy app-std (front) | $([ "$DSTD" = success ] && echo '✅' || echo "⚠️ $DSTD") |"
+            fi
+            if [ -n "$DNIX" ]; then
+              echo "| Deploy app-nix (back) | $([ "$DNIX" = success ] && echo '✅' || echo "⚠️ $DNIX") |"
             fi
           } >> "$GITHUB_STEP_SUMMARY"

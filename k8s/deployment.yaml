@@ -1,5 +1,5 @@
-# Two Deployments + shared Service
-# Применять в backend-кластере: kubectl --context back apply -f deployment.yaml
+# All-in-one: оба Deployment + Service (один k3s, например локально)
+# Прод: раздельно — deployment-front.yaml (--context front) и deployment-back.yaml (--context back)
 #
 # app-std  — n2c image, runs on any node
 # app-nix  — nix-snapshotter image, only on nodes with label nix-snapshotter=true
