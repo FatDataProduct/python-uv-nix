@@ -28,26 +28,47 @@ jobs:
           git fetch --depth=1 -q origin "$GITHUB_SHA"
           git checkout -q FETCH_HEAD
 
-      - name: Prepare checks
-        uses: dflydev/check-runs-action@v1
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          checks: |
-            [
-              { "id": "fmt",   "name": "✅ Format" },
-              { "id": "check", "name": "✅ Flake Check" },
-              { "id": "build", "name": "📦 Build OCI" }
-            ]
-          status: "in_progress"
-
       - name: Run checks
         id: checks
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          nix fmt $NIX_FLAGS -- --ci &
+          API="https://api.github.com/repos/${GITHUB_REPOSITORY}"
+          AUTH="Authorization: token ${GH_TOKEN}"
+
+          create_check() {
+            local id
+            id=$(curl -sf -X POST -H "$AUTH" -H "Accept: application/vnd.github+json" \
+              "${API}/check-runs" \
+              -d "{\"name\":\"$1\",\"head_sha\":\"${GITHUB_SHA}\",\"status\":\"in_progress\"}" \
+              | grep -o '"id":[0-9]*' | head -1 | grep -o '[0-9]*')
+            echo "$id"
+          }
+
+          finish_check() {
+            curl -sf -X PATCH -H "$AUTH" -H "Accept: application/vnd.github+json" \
+              "${API}/check-runs/$1" \
+              -d "{\"status\":\"completed\",\"conclusion\":\"$2\"}" > /dev/null
+          }
+
+          FMT_CID=$(create_check "✅ Format")
+          CHECK_CID=$(create_check "✅ Flake Check")
+          BUILD_CID=$(create_check "📦 Build OCI")
+
+          run_and_report() {
+            local cid=$1; shift
+            if "$@"; then
+              finish_check "$cid" "success"; return 0
+            else
+              finish_check "$cid" "failure"; return 1
+            fi
+          }
+
+          run_and_report "$FMT_CID" nix fmt $NIX_FLAGS -- --ci &
           FMT_PID=$!
-          nix flake check --no-build $NIX_FLAGS &
+          run_and_report "$CHECK_CID" nix flake check --no-build $NIX_FLAGS &
           CHECK_PID=$!
-          nix build .#oci-prod $NIX_FLAGS &
+          run_and_report "$BUILD_CID" nix build .#oci-prod $NIX_FLAGS &
           BUILD_PID=$!
 
           FMT_RC=0;   wait $FMT_PID   || FMT_RC=$?
@@ -59,30 +80,6 @@ jobs:
           echo "build=$([ $BUILD_RC -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
 
           [ $FMT_RC -eq 0 ] && [ $CHECK_RC -eq 0 ] && [ $BUILD_RC -eq 0 ]
-
-      - name: Report ✅ Format
-        if: always()
-        uses: dflydev/check-runs-action@v1
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          id: fmt
-          conclusion: ${{ steps.checks.outputs.fmt || 'failure' }}
-
-      - name: Report ✅ Flake Check
-        if: always()
-        uses: dflydev/check-runs-action@v1
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          id: check
-          conclusion: ${{ steps.checks.outputs.check || 'failure' }}
-
-      - name: Report 📦 Build OCI
-        if: always()
-        uses: dflydev/check-runs-action@v1
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          id: build
-          conclusion: ${{ steps.checks.outputs.build || 'failure' }}
 
       - name: Push to GHCR
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.checks.outcome == 'success'
@@ -108,14 +105,12 @@ jobs:
           CHK="${{ steps.checks.outputs.check }}"
           BLD="${{ steps.checks.outputs.build }}"
 
-          echo "## CI/CD Results" >> "$GITHUB_STEP_SUMMARY"
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Check | Result |" >> "$GITHUB_STEP_SUMMARY"
-          echo "|-------|--------|" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Format | $([ "$FMT" = success ] && echo '✅' || echo '❌') |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Flake Check | $([ "$CHK" = success ] && echo '✅' || echo '❌') |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Build OCI | $([ "$BLD" = success ] && echo '✅' || echo '❌') |" >> "$GITHUB_STEP_SUMMARY"
-
-          SIZE=$(nix path-info -Sh ./result 2>/dev/null | awk '{print $2}' || echo "N/A")
-          echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "📦 OCI closure size: **$SIZE**" >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo "## CI/CD Results"
+            echo ""
+            echo "| Check | Result |"
+            echo "|-------|--------|"
+            echo "| Format | $([ "$FMT" = success ] && echo '✅' || echo '❌') |"
+            echo "| Flake Check | $([ "$CHK" = success ] && echo '✅' || echo '❌') |"
+            echo "| Build OCI | $([ "$BLD" = success ] && echo '✅' || echo '❌') |"
+          } >> "$GITHUB_STEP_SUMMARY"
