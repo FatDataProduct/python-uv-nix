@@ -122,47 +122,7 @@ jobs:
           ${SKOPEO}/bin/skopeo --insecure-policy copy \
             "oci-archive:${IMG_NIX}" "docker://${REGISTRY}/${REPO}:latest-nix"
 
-      - name: Deploy app-std (front cluster)
-        id: deploy_std
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.checks.outcome == 'success'
-        env:
-          # Имя секрета историческое: здесь лежит пароль root jump-хоста (не PEM-ключ).
-          SSHPASS: ${{ secrets.SSH_PRIVATE_KEY }}
-          SSH_DEPLOY_HOST: ${{ secrets.SSH_HOST }}
-          SSH_DEPLOY_USER: ${{ secrets.SSH_USERNAME }}
-          SSH_DEPLOY_PORT: ${{ secrets.SSH_PORT }}
-        run: |
-          if [ -z "$SSHPASS" ]; then
-            echo "SSH_PRIVATE_KEY secret not set — skipping front deploy"
-            echo "deploy_std=skipped" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          REPO="${IMAGE_NAME,,}"
-          SHORT="${GITHUB_SHA:0:7}"
-          IMG_STD="${REGISTRY}/${REPO}:${SHORT}"
-          PORT="${SSH_DEPLOY_PORT:-22}"
-
-          OPENSSH=$(nix build nixpkgs#openssh.out $NIX_FLAGS --print-out-paths --no-link)
-          SSHPASS_BIN=$(nix build nixpkgs#sshpass.out $NIX_FLAGS --print-out-paths --no-link)/bin/sshpass
-          export PATH="${OPENSSH}/bin:${PATH}"
-
-          test -f k8s/deployment-front.yaml
-
-          # apply создаёт Service+Deployment, если ещё не заведены на кластере
-          $SSHPASS_BIN -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            -o PreferredAuthentications=password -o PubkeyAuthentication=no \
-            -p "$PORT" \
-            "${SSH_DEPLOY_USER}@${SSH_DEPLOY_HOST}" \
-            "set -e; \
-             kubectl --context front apply -f - -n default; \
-             kubectl --context front set image deployment/app-std -n default app=${IMG_STD}; \
-             kubectl --context front rollout status deployment/app-std -n default --timeout=120s; \
-             echo Deployed front app-std=${IMG_STD}" \
-            < k8s/deployment-front.yaml
-
-          echo "deploy_std=success" >> "$GITHUB_OUTPUT"
-
+      # Сначала back (perturabo): иначе при падении front этот шаг не выполнялся бы вообще.
       - name: Deploy app-nix (back cluster)
         id: deploy_nix
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.checks.outcome == 'success'
@@ -196,11 +156,51 @@ jobs:
             "set -e; \
              kubectl --context back apply -f - -n default; \
              kubectl --context back set image deployment/app-nix -n default app=${IMG_NIX}; \
-             kubectl --context back rollout status deployment/app-nix -n default --timeout=120s || echo 'WARN: app-nix rollout not ready (no matching nodes?)'; \
+             kubectl --context back rollout status deployment/app-nix -n default --timeout=300s || echo 'WARN: app-nix rollout not ready (no matching nodes / image pull?)'; \
              echo Deployed back app-nix=${IMG_NIX}" \
             < k8s/deployment-back.yaml
 
           echo "deploy_nix=success" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy app-std (front cluster)
+        id: deploy_std
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.checks.outcome == 'success'
+        env:
+          # Имя секрета историческое: здесь лежит пароль root jump-хоста (не PEM-ключ).
+          SSHPASS: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_DEPLOY_HOST: ${{ secrets.SSH_HOST }}
+          SSH_DEPLOY_USER: ${{ secrets.SSH_USERNAME }}
+          SSH_DEPLOY_PORT: ${{ secrets.SSH_PORT }}
+        run: |
+          if [ -z "$SSHPASS" ]; then
+            echo "SSH_PRIVATE_KEY secret not set — skipping front deploy"
+            echo "deploy_std=skipped" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          REPO="${IMAGE_NAME,,}"
+          SHORT="${GITHUB_SHA:0:7}"
+          IMG_STD="${REGISTRY}/${REPO}:${SHORT}"
+          PORT="${SSH_DEPLOY_PORT:-22}"
+
+          OPENSSH=$(nix build nixpkgs#openssh.out $NIX_FLAGS --print-out-paths --no-link)
+          SSHPASS_BIN=$(nix build nixpkgs#sshpass.out $NIX_FLAGS --print-out-paths --no-link)/bin/sshpass
+          export PATH="${OPENSSH}/bin:${PATH}"
+
+          test -f k8s/deployment-front.yaml
+
+          $SSHPASS_BIN -e ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -o PreferredAuthentications=password -o PubkeyAuthentication=no \
+            -p "$PORT" \
+            "${SSH_DEPLOY_USER}@${SSH_DEPLOY_HOST}" \
+            "set -e; \
+             kubectl --context front apply -f - -n default; \
+             kubectl --context front set image deployment/app-std -n default app=${IMG_STD}; \
+             kubectl --context front rollout status deployment/app-std -n default --timeout=300s; \
+             echo Deployed front app-std=${IMG_STD}" \
+            < k8s/deployment-front.yaml
+
+          echo "deploy_std=success" >> "$GITHUB_OUTPUT"
 
       - name: Summary
         if: always()
