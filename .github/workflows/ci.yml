@@ -86,7 +86,7 @@ jobs:
         env:
           REGISTRY_AUTH_FILE: /tmp/skopeo-auth.json
         run: |
-          SKOPEO=$(nix build nixpkgs#skopeo --print-out-paths --no-link)
+          SKOPEO=$(nix build nixpkgs#skopeo.out --print-out-paths --no-link)
 
           echo "${{ secrets.GITHUB_TOKEN }}" | \
             ${SKOPEO}/bin/skopeo login $REGISTRY -u ${{ github.actor }} --password-stdin
