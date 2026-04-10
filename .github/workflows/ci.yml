@@ -108,10 +108,10 @@ jobs:
         id: deploy
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.checks.outcome == 'success'
         env:
-          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
+          SSH_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
         run: |
-          if [ -z "$KUBE_CONFIG" ]; then
-            echo "KUBE_CONFIG secret not set — skipping deploy"
+          if [ -z "$SSH_KEY" ]; then
+            echo "SSH_PRIVATE_KEY secret not set — skipping deploy"
             echo "deployed=skipped" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -119,13 +119,15 @@ jobs:
           IMAGE_REF=$(cat $(nix build .#nix-image-ref $NIX_FLAGS --print-out-paths --no-link))
           echo "Image reference: $IMAGE_REF"
 
-          KUBECONFIG_FILE=$(mktemp)
-          echo "$KUBE_CONFIG" | base64 -d > "$KUBECONFIG_FILE"
-          trap "rm -f $KUBECONFIG_FILE" EXIT
+          MANIFEST=$(sed "s|__NIX_IMAGE__|$IMAGE_REF|" k8s/deployment.yaml)
 
-          sed "s|__NIX_IMAGE__|$IMAGE_REF|" k8s/deployment.yaml | \
-            nix shell nixpkgs#kubectl $NIX_FLAGS -c kubectl \
-              --kubeconfig "$KUBECONFIG_FILE" apply -f -
+          eval "$(ssh-agent -s)"
+          ssh-add - <<< "$SSH_KEY"
+
+          echo "$MANIFEST" | ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -p ${{ secrets.SSH_PORT }} \
+            ${{ secrets.SSH_USERNAME }}@${{ secrets.SSH_HOST }} \
+            "kubectl apply -f -"
 
           echo "deployed=success" >> "$GITHUB_OUTPUT"
 
