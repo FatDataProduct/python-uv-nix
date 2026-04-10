@@ -18,6 +18,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup Nix cache
+        run: |
+          SHARED="/var/cache/nix-runners-shared/nix"
+          LOCAL="$HOME/.cache/nix"
+          mkdir -p "$LOCAL"
+          # Symlink shared eval/git caches for cross-project reuse;
+          # fetcher-cache stays per-runner to avoid SQLite readonly errors.
+          for sub in eval-cache-v6 gitv3; do
+            [ -d "$SHARED/$sub" ] && ln -sfn "$SHARED/$sub" "$LOCAL/$sub" || true
+          done
+          # Fix permissions on shared caches so this runner UID can write
+          chmod a+rw "$SHARED"/fetcher-cache-v4.sqlite* 2>/dev/null || true
+          find "$SHARED/eval-cache-v6" -type f -exec chmod a+rw {} + 2>/dev/null || true
+
       - name: Check, lint & build
         run: |
           nix flake check --no-build $NIX_FLAGS &
@@ -48,6 +62,17 @@ jobs:
       REGISTRY_AUTH_FILE: /tmp/skopeo-auth.json
     steps:
       - uses: actions/checkout@v4
+
+      - name: Setup Nix cache
+        run: |
+          SHARED="/var/cache/nix-runners-shared/nix"
+          LOCAL="$HOME/.cache/nix"
+          mkdir -p "$LOCAL"
+          for sub in eval-cache-v6 gitv3; do
+            [ -d "$SHARED/$sub" ] && ln -sfn "$SHARED/$sub" "$LOCAL/$sub" || true
+          done
+          chmod a+rw "$SHARED"/fetcher-cache-v4.sqlite* 2>/dev/null || true
+          find "$SHARED/eval-cache-v6" -type f -exec chmod a+rw {} + 2>/dev/null || true
 
       - name: Login to GHCR
         run: |
