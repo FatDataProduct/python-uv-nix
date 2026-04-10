@@ -14,7 +14,7 @@ env:
 jobs:
   ci:
     name: "🔍 Check & Build"
-    runs-on: [self-hosted, nix]
+    runs-on: [nix]
     steps:
       - uses: actions/checkout@v4
 
@@ -38,7 +38,7 @@ jobs:
 
   push:
     name: "🚀 Push to GHCR"
-    runs-on: [self-hosted, nix]
+    runs-on: [nix]
     needs: ci
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
