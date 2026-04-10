@@ -55,6 +55,7 @@ jobs:
           FMT_CID=$(create_check "✅ Format")
           CHECK_CID=$(create_check "✅ Flake Check")
           BUILD_CID=$(create_check "📦 Build OCI")
+          NIXIMG_CID=$(create_check "📦 Build nix-image")
 
           run_task() {
             local cid=$1; shift
@@ -71,16 +72,20 @@ jobs:
           CHECK_PID=$!
           run_task "$BUILD_CID" nix build .#oci-prod $NIX_FLAGS &
           BUILD_PID=$!
+          run_task "$NIXIMG_CID" nix build .#nix-image $NIX_FLAGS &
+          NIXIMG_PID=$!
 
-          FMT_RC=0;   wait $FMT_PID   || FMT_RC=$?
-          CHECK_RC=0;  wait $CHECK_PID  || CHECK_RC=$?
-          BUILD_RC=0;  wait $BUILD_PID  || BUILD_RC=$?
+          FMT_RC=0;    wait $FMT_PID    || FMT_RC=$?
+          CHECK_RC=0;   wait $CHECK_PID   || CHECK_RC=$?
+          BUILD_RC=0;   wait $BUILD_PID   || BUILD_RC=$?
+          NIXIMG_RC=0;  wait $NIXIMG_PID  || NIXIMG_RC=$?
 
           echo "fmt=$([ $FMT_RC -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
           echo "check=$([ $CHECK_RC -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
           echo "build=$([ $BUILD_RC -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
+          echo "niximg=$([ $NIXIMG_RC -eq 0 ] && echo success || echo failure)" >> "$GITHUB_OUTPUT"
 
-          [ $FMT_RC -eq 0 ] && [ $CHECK_RC -eq 0 ] && [ $BUILD_RC -eq 0 ]
+          [ $FMT_RC -eq 0 ] && [ $CHECK_RC -eq 0 ] && [ $BUILD_RC -eq 0 ] && [ $NIXIMG_RC -eq 0 ]
 
       - name: Push to GHCR
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.checks.outcome == 'success'
@@ -105,6 +110,7 @@ jobs:
           FMT="${{ steps.checks.outputs.fmt }}"
           CHK="${{ steps.checks.outputs.check }}"
           BLD="${{ steps.checks.outputs.build }}"
+          NIXIMG="${{ steps.checks.outputs.niximg }}"
 
           {
             echo "## CI/CD Results"
@@ -114,4 +120,5 @@ jobs:
             echo "| Format | $([ "$FMT" = success ] && echo '✅' || echo '❌') |"
             echo "| Flake Check | $([ "$CHK" = success ] && echo '✅' || echo '❌') |"
             echo "| Build OCI | $([ "$BLD" = success ] && echo '✅' || echo '❌') |"
+            echo "| Build nix-image | $([ "$NIXIMG" = success ] && echo '✅' || echo '❌') |"
           } >> "$GITHUB_STEP_SUMMARY"
